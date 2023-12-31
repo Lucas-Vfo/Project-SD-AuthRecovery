@@ -1,0 +1,46 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("") // uses connection pooling
+  directUrl = env("") // uses a direct connection
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  lastname  String
+  email     String   @unique
+  username  String   @unique
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model PasswordRecovery {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  token      String
+  expiration DateTime
+}
+
+model Product {
+  id         Int      @id @default(autoincrement())
+  name       String   @unique
+  price      Int      @default(999)
+  createdAt  DateTime @default(now())
+  category   Category @relation(fields: [categoryId], references: [id])
+  categoryId Int
+  stock      Int      @default(0)
+}
+
+model Category {
+  id       Int       @id @default(autoincrement())
+  name     String    @unique
+  products Product[]
+}
