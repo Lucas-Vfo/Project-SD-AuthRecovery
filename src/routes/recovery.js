@@ -1,89 +1,94 @@
-const express = require('express');
-const db = require('../db');
-const dbRecovery = require('../dbrecovery');
-const bcrypt = require('bcrypt');
-const crypto = require('crypto');
-const nodemailer = require('nodemailer');
-require('dotenv').config();
+const express = require("express");
+const bcrypt = require("bcrypt");
+const crypto = require("crypto");
+const jwt = require("jsonwebtoken");
+const { Resend } = require("resend");
+const { messages } = require("../utils/messages.js");
+const prisma = require("@prisma/client");
+const jwtSecret = process.env.JWT_SECRET || 'tu_secreto_compartido';
 
+const resend = new Resend("re_LdSKJUzC_4CZcFGADb2CvsUtYCaW7QBU5");
+
+const prismaDB = new prisma.PrismaClient();
 const router = express.Router();
 
-const transporter = nodemailer.createTransport({
-  host: 'multiverse.cl',
-  port: 465,
-  secure: true,
-  auth: {
-    user: process.env.SENDER_EMAIL,
-    pass: process.env.SENDER_EMAIL_PASS,
-  },
-});
+async function findByToken(token) {
+  return prismaDB.passwordRecovery.findUnique({
+    where: {
+      token,
+    },
+    include: {
+      user: true,
+    },
+  });
+}
+
+async function deleteByToken(token) {
+  return prismaDB.passwordRecovery.delete({
+    where: {
+      token,
+    },
+  });
+}
 
 // Solicitar restablecimiento de contraseña
-router.post('/request-reset', (req, res) => {
-  const { email } = req.body;
-  // Buscar al usuario por su email
-  db.get('SELECT * FROM users WHERE email = ?', [email], (err, user) => {
-    if (err) {
-      return res.status(500).send('Error en el servidor');
+router.post("/request-reset", async (req, res) => {
+  try {
+    const { email } = req.body; 
+
+    if (!email ) {
+      return res.status(400).json({ message: messages.error.needProps });
     }
+
+    // Buscar al usuario por su email
+    const user = await prismaDB.user.findUnique({
+      where: {
+        email: email,
+      },
+    });
+
     if (!user) {
-      return res.status(404).send('Usuario no encontrado');
+      return res.status(404).json({ message: messages.error.userNotFound });
     }
 
     // Generar un token de restablecimiento
-    const resetToken = crypto.randomBytes(20).toString('hex');
+    const resetToken = crypto.randomBytes(20).toString("hex");
     const expiration = new Date();
     expiration.setHours(expiration.getHours() + 1); // Token válido por 1 hora
 
-    // Almacenar el token en la base de datos
-    dbRecovery.run(
-      'INSERT INTO password_resets (userId, token, expiration) VALUES (?, ?, ?)',
-      [user.id, resetToken, expiration],
-      (err) => {
-        if (err) {
-          return res.status(500).send('Error al guardar el token de restablecimiento');
-        }
-
-        // Enviar correo con el token
-        const mailOptions = {
-          from: process.env.SENDER_EMAIL,
-          to: user.email,
-          subject: 'Restablecimiento de contraseña',
-          text: 'Tu token de restablecimiento es: ' + resetToken,
-        };
-
-        transporter.sendMail(mailOptions, (err, info) => {
-          if (err) {
-            return res.status(500).send('Error al enviar correo electrónico' + err);
-          }
-          res.send('Correo de restablecimiento enviado a ' + email);
-        });
-      }
-    );
-  });
-});
-
-// Restablecer la contraseña
-router.post('/reset', (req, res) => {
-  const { token, newPassword } = req.body;
-  // Verificar el token y la fecha de expiración
-  dbRecovery.get('SELECT * FROM password_resets WHERE token = ?', [token], async (err, reset) => {
-    if (err || !reset) {
-      return res.status(400).send('Token inválido o expirado');
-    }
-    if (new Date() > new Date(reset.expiration)) {
-      return res.status(400).send('Token expirado');
-    }
-
-    // Si el token es válido, permitir al usuario establecer una nueva contraseña
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-    db.run('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, reset.userId], (err) => {
-      if (err) {
-        return res.status(500).send('Error al actualizar la contraseña');
-      }
-      res.send('Contraseña actualizada con éxito');
+    // Almacenar el token en la base de datos utilizando Prisma
+    await prismaDB.passwordRecovery.create({
+      data: {
+        userId: user.id,
+        token: resetToken,
+        expiration: expiration,
+      },
     });
-  });
+
+    const tokenData = {
+      email: user.email,
+      userId: user.id, // Usar directamente user.id
+    };
+
+    const token = jwt.sign({ data: tokenData }, jwtSecret, {
+      expiresIn: 86400,
+    });
+
+    const forgetUrl = `http://localhost:3000/change-password?token=${token}`;
+
+    await resend.emails.send({
+      from: "onboarding@resend.dev",
+      to: email,
+      subject: "Cambio de Contraseña",
+      html: `<a href=${forgetUrl}>Cambio de contraseña</a>`,
+    });
+
+    res.send(`Correo de restablecimiento enviado a ${email}`);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: messages.error.default, error: err });
+  }
+
 });
 
 module.exports = router;
