@@ -31,6 +31,15 @@ async function deleteByToken(token) {
   });
 }
 
+// Middleware para extraer el token de la URL y pasarlo como encabezado en la solicitud
+router.use((req, res, next) => {
+  const token = req.query.token;
+  if (token) {
+    req.headers.token = token;
+  }
+  next();
+});
+
 // Solicitar restablecimiento de contraseña
 router.post("/request-reset", async (req, res) => {
   try {
