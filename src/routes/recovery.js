@@ -86,10 +86,17 @@ router.post("/request-reset", async (req, res) => {
     const forgetUrl = `http://localhost:3000/change-password?token=${token}`;
 
     await resend.emails.send({
-      from: "onboarding@resend.dev",
+      from: 'onboarding@resend.dev',
       to: email,
-      subject: "Cambio de Contraseña",
-      html: `<a href=${forgetUrl}>Cambio de contraseña</a>`,
+      subject: 'Cambio de Contraseña',
+      html: `
+        <div style="padding: 20px; background-color: white; display: grid; justify-items: center;">
+          <span style="text-align: center;">Haz click acá para cambiar de contraseña 👇🏻</span>
+          <a href=${forgetUrl} style="margin: 10px auto;">
+            <button>Cambiar contraseña</button>
+          </a>
+        </div>
+      `,
     });
 
     res.send(`Correo de restablecimiento enviado a ${email}`);
